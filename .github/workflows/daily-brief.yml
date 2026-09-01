@@ -1,0 +1,31 @@
+name: Daily Debrief
+
+on:
+  schedule:
+    # Fires at both 13:00 and 14:00 UTC to cover 8am Central through both
+    # CDT (summer/fall, UTC-5) and CST (winter, UTC-6). The script itself
+    # checks the real Chicago-local hour and only sends once, at 8am.
+    - cron: "0 13 * * *"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      force_send:
+        description: "Send immediately regardless of the current hour (for testing)"
+        type: boolean
+        default: false
+
+jobs:
+  send-brief:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Send daily brief
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          FORCE_SEND: ${{ inputs.force_send && '1' || '0' }}
+        run: python daily_brief.py
