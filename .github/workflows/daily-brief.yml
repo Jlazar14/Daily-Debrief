@@ -2,17 +2,21 @@ name: Daily Debrief
 
 on:
   schedule:
-    # Fires at both 13:00 and 14:00 UTC to cover 8am Central through both
-    # CDT (summer/fall, UTC-5) and CST (winter, UTC-6). The script itself
-    # checks the real Chicago-local hour and only sends once, at 8am.
-    - cron: "0 13 * * *"
-    - cron: "0 14 * * *"
+    # GitHub's free scheduler delays low-traffic repos' cron jobs by hours,
+    # not minutes (observed drift here: 4-5+ hours). Firing every 15 minutes
+    # all day is the reliable workaround — daily_brief.py does the real
+    # gating (only sends during the actual 8am-9am Chicago local window, and
+    # only once per day via last_sent.txt) so this doesn't spam you.
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       force_send:
         description: "Send immediately regardless of the current hour (for testing)"
         type: boolean
         default: false
+
+permissions:
+  contents: write
 
 jobs:
   send-brief:
@@ -29,3 +33,15 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           FORCE_SEND: ${{ inputs.force_send && '1' || '0' }}
         run: python daily_brief.py
+
+      - name: Commit sent-today marker
+        run: |
+          if ! git diff --quiet -- last_sent.txt; then
+            git config user.name "daily-debrief-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add last_sent.txt
+            git commit -m "Mark daily brief sent [skip ci]"
+            git push
+          else
+            echo "No change to last_sent.txt, nothing to commit."
+          fi

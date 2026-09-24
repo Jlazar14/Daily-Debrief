@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 CHAT_ID = "6804789036"
 LAT, LON = 40.1164, -88.2434  # Champaign-Urbana, IL
 ASSIGNMENTS_FILE = os.path.join(os.path.dirname(__file__), "assignments.json")
+LAST_SENT_FILE = os.path.join(os.path.dirname(__file__), "last_sent.txt")
 
 
 def http_get_json(url):
@@ -142,16 +143,29 @@ def main():
         print("ERROR: TELEGRAM_BOT_TOKEN not set", file=sys.stderr)
         sys.exit(1)
 
-    # The workflow fires at both 13:00 and 14:00 UTC to cover CDT/CST (Daylight
-    # Saving switches in November). Only actually send during the 8 o'clock
-    # hour in Chicago local time, so exactly one of those two firings sends.
+    # GitHub's free scheduler can delay a low-traffic repo's cron by hours, not
+    # minutes — observed drift here has been 4-5+ hours. So the workflow fires
+    # every 15 minutes all day, and this check does the real gating: only send
+    # during the 8 o'clock hour in Chicago local time, and only once per day
+    # (tracked via last_sent.txt, committed back to the repo after sending) so
+    # multiple firings inside that hour don't cause duplicate messages.
     now_chicago = datetime.now(ZoneInfo("America/Chicago"))
-    force = os.environ.get("FORCE_SEND") == "1"
-    if not force and now_chicago.hour != 8:
-        print(f"Skipping — local Chicago time is {now_chicago.strftime('%H:%M')}, not the 8am window.")
-        return
-
     today = date.today()
+    force = os.environ.get("FORCE_SEND") == "1"
+
+    if not force:
+        if now_chicago.hour != 8:
+            print(f"Skipping — local Chicago time is {now_chicago.strftime('%H:%M')}, not the 8am window.")
+            return
+        try:
+            with open(LAST_SENT_FILE) as f:
+                last_sent = f.read().strip()
+        except FileNotFoundError:
+            last_sent = ""
+        if last_sent == today.isoformat():
+            print(f"Skipping — already sent today ({last_sent}).")
+            return
+
     weekday_str = today.strftime("%A, %B %-d")
 
     weather = get_weather()
@@ -175,6 +189,10 @@ def main():
 
     send_telegram(token, message)
     print("Sent successfully.")
+
+    if not force:
+        with open(LAST_SENT_FILE, "w") as f:
+            f.write(today.isoformat())
 
 
 if __name__ == "__main__":
